@@ -51,6 +51,7 @@
   #sgOut .plan{margin:4px 0 0 8px;color:#8e1e4f;font-weight:600;}
   #sgOut .none{margin:4px 0 0 8px;color:#a33;}
   #sgOut .ym{display:inline-block;margin:1px 4px 1px 0;padding:0 5px;background:#fff;border:1px solid #ccc;border-radius:3px;}
+  #sgOut .ym.pick{border:2px solid #8e1e4f;font-weight:600;}
   .modeBtn.on{background:#c2185b !important;}
   #footNote{font-size:11px;color:#888;padding:8px 12px 16px;line-height:1.6;}
 </style>
@@ -104,7 +105,11 @@
       <div style="font-size:12px;margin:4px 0;">
         局 <select id="sgKyoku"><option value="all">4局すべて</option><option>木局</option><option>火局</option><option>金局</option><option>水局</option></select>
         先 <select id="sgYears"><option>1</option><option>2</option><option selected>3</option></select> 年
-        <label style="display:inline"><input type="checkbox" id="sgYear" checked>年盤も吉であること</label>
+        <br>基準
+        <select id="sgMode">
+          <option value="strict" selected>厳格：年盤・月盤ともに吉（教わった基準）</option>
+          <option value="casual">気軽：月盤のみ吉</option>
+        </select>
         <button id="sgBtn">算出</button>
       </div>
       <div id="sgOut"></div>
@@ -113,7 +118,7 @@
 </div>
 <div id="footNote">
   天道は月の天道を月盤・日盤に表示（支単位30度、橙色）。吉方と重なると「天道吉方」。
-  <b>時盤は標準規則で実装済みだが未照合</b>。偏角は緯度による近似値（±0.4度程度）で、境界付近は設定から手動調整可。
+  偏角は緯度による近似値（±0.4度程度）で、境界付近は設定から手動調整可。
   方位線は地図上の直線（航程線）。「方位線: 海外」で約1万kmまで描画。
 </div>
 
@@ -493,28 +498,32 @@ function branchIsGood(kind, y, m, d, person, cfg, br){
 }
 // personAt(year) → person（数え年で月命の有無が変わるため年ごとに取得）
 // 戻り値: { '木局': { branches:[{br, months:[{y,m,setsu}]}], plan:[{y,m,br}]|null, missing:[br] } ... }
-function sangouCandidates(personAt, cfg, fromY, fromM, nMonths, requireYear){
+// maxSpan: 完成までの許容月数（12=開始月を含め1年以内）。省略時12
+function sangouCandidates(personAt, cfg, fromY, fromM, nMonths, requireYear, maxSpan){
+  maxSpan = maxSpan || 12;
   var res = {};
   var ym = []; var yy=fromY, mm=fromM;
   for (var i=0;i<nMonths;i++){ ym.push({y:yy, m:mm, idx:i}); mm++; if (mm>12){ mm=1; yy++; } }
   Object.keys(SANGOU).forEach(function(kyoku){
     var branches = SANGOU[kyoku].map(function(br){
-      var months = ym.filter(function(o){
+      var months = [];
+      ym.forEach(function(o){
         var person = personAt(o.y);
-        if (!branchIsGood('month', o.y, o.m, 15, person, cfg, br)) return false;
-        if (requireYear && !branchIsGood('year', o.y, o.m, 15, person, cfg, br)) return false;
-        return true;
-      }).map(function(o){ return {y:o.y, m:o.m, idx:o.idx, setsu: BRANCHES[monthBranchIdx(o.y,o.m,15)]+'月'}; });
+        if (!branchIsGood('month', o.y, o.m, 15, person, cfg, br)) return;
+        var yg = branchIsGood('year', o.y, o.m, 15, person, cfg, br);
+        if (requireYear && !yg) return;
+        months.push({y:o.y, m:o.m, idx:o.idx, yearGood:yg, setsu: BRANCHES[monthBranchIdx(o.y,o.m,15)]+'月'});
+      });
       return {br:br, months:months};
     });
-    // 最短完成: 3支それぞれ別の月、最大-最小 <= nMonths、完成月(最大idx)最小
+    // 最短完成: 3支それぞれ別の月、開始月からmaxSpanヶ月以内、完成月(最大idx)最小
     var best = null;
     var A=branches[0].months, B=branches[1].months, C=branches[2].months;
     for (var a=0;a<A.length;a++) for (var b2=0;b2<B.length;b2++) for (var c=0;c<C.length;c++){
       var ia=A[a].idx, ib=B[b2].idx, ic=C[c].idx;
       if (ia===ib||ib===ic||ia===ic) continue;
       var mx = Math.max(ia,ib,ic), mn = Math.min(ia,ib,ic);
-      if (mx - mn >= nMonths) continue;
+      if (mx - mn >= maxSpan) continue; // 例: maxSpan=12 → 開始月含め12ヶ月以内
       if (!best || mx < best.mx || (mx===best.mx && mn < best.mn)){ // 同じ完成月なら開始が早い案
         best = {mx:mx, mn:mn, plan:[{y:A[a].y,m:A[a].m,br:branches[0].br,setsu:A[a].setsu},
                                      {y:B[b2].y,m:B[b2].m,br:branches[1].br,setsu:B[b2].setsu},
@@ -629,14 +638,24 @@ function currentBoard(kind){
 var map=null, homeMarker=null, destMarker=null, sectorLayer=null, sangouLayer=null, homeMode=false;
 var hasMap = (typeof L !== 'undefined');
 if (hasMap){
-  map = L.map('map').setView(state.home ? [state.home.lat, state.home.lng] : [35.68, 139.70], state.home?10:6);
+  map = L.map('map', {worldCopyJump:false, maxBounds:[[-85,-180],[85,180]], maxBoundsViscosity:1.0})
+          .setView(state.home ? [state.home.lat, state.home.lng] : [35.68, 139.70], state.home?10:6);
+  // 世界1枚が画面幅を埋める倍率を最小ズームにする（複製表示を防ぐ）
+  function applyMinZoom(){
+    var w = map.getSize().x || 1000;
+    var mz = Math.max(1, Math.ceil(Math.log(w/256)/Math.LN2));
+    map.setMinZoom(mz);
+    if (map.getZoom() < mz) map.setZoom(mz);
+  }
+  applyMinZoom();
+  map.on('resize', applyMinZoom);
   var baseLayers = {
     '地理院 標準': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
-      {maxZoom:18, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
+      {maxZoom:18, noWrap:true, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
     '地理院 淡色': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-      {maxZoom:18, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
+      {maxZoom:18, noWrap:true, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
     'OSM (海外用)': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'})
+      {maxZoom:19, noWrap:true, attribution:'&copy; OpenStreetMap contributors'})
   };
   var savedBase = store.get('baseLayer', '地理院 標準');
   (baseLayers[savedBase] || baseLayers['地理院 標準']).addTo(map);
@@ -657,7 +676,8 @@ function rhumbPoint(lat,lng,trueBearing,tDeg){
   return [la, x];
 }
 function trueBearing(from, to){ // 航程線方位(=地図上の直線)
-  var dx = to.lng - from.lng, dy = mercY(to.lat) - mercY(from.lat);
+  var dx = ((to.lng - from.lng + 540) % 360) - 180; // 日付変更線越えを正規化
+  var dy = mercY(to.lat) - mercY(from.lat);
   var b = Math.atan2(dx, dy)*180/Math.PI;
   return ((b%360)+360)%360;
 }
@@ -668,6 +688,17 @@ function haversineKm(a, b){
   return 2*R*Math.asin(Math.sqrt(h));
 }
 
+// 経度が±180を越える多角形を、日付変更線で回り込むように複製して追加
+function addWrapped(layer, pts, opts, tip){
+  var lngs = pts.map(function(q){ return q[1]; });
+  var mx = Math.max.apply(null,lngs), mn = Math.min.apply(null,lngs);
+  var copies = [pts];
+  if (mx > 180) copies.push(pts.map(function(q){ return [q[0], q[1]-360]; }));
+  if (mn < -180) copies.push(pts.map(function(q){ return [q[0], q[1]+360]; }));
+  copies.forEach(function(c){
+    var pg = L.polygon(c, opts); if (tip) pg.bindTooltip(tip, {sticky:true}); pg.addTo(layer);
+  });
+}
 function drawSectors(){
   if (!hasMap) return;
   sectorLayer.clearLayers();
@@ -687,9 +718,8 @@ function drawSectors(){
     else if (g.length){ col='#e91e63'; op=.20; }
     else if (bd.length){ col='#555'; op=.16; }
     else { col='#888'; op=.03; }
-    L.polygon(pts, {color:'#333', weight:1, opacity:.5, fillColor:col, fillOpacity:op})
-      .bindTooltip(b.palaces[p].name+' '+b.palaces[p].star+' '+(g[0]||'')+' '+bd.join('・')+(b.palaces[p].tendo?' '+b.palaces[p].tendo:''), {sticky:true})
-      .addTo(sectorLayer);
+    addWrapped(sectorLayer, pts, {color:'#333', weight:1, opacity:.5, fillColor:col, fillOpacity:op},
+      b.palaces[p].name+' '+b.palaces[p].star+' '+(g[0]||'')+' '+bd.join('・')+(b.palaces[p].tendo?' '+b.palaces[p].tendo:''));
   });
   // 天道 (支単位30°のスライス)
   if (b.tendoBranch !== null && b.tendoBranch !== undefined){
@@ -697,15 +727,16 @@ function drawSectors(){
     var tp = [[state.home.lat, state.home.lng]];
     for (var ta=ta0; ta<=ta1+0.001; ta+=10) tp.push(rhumbPoint(state.home.lat, state.home.lng, ta - D, T));
     var tcol = (b.palaces[b.tendoPal].tendo==='天道(凶重複)') ? '#999' : '#ff9800';
-    L.polygon(tp, {color:tcol, weight:1.2, opacity:.8, fillColor:tcol, fillOpacity:.18, dashArray:'6 4'})
-      .bindTooltip('天道 '+K.BRANCHES[b.tendoBranch]+' ('+b.palaces[b.tendoPal].tendo+')', {sticky:true})
-      .addTo(sectorLayer);
+    addWrapped(sectorLayer, tp, {color:tcol, weight:1.2, opacity:.8, fillColor:tcol, fillOpacity:.18, dashArray:'6 4'},
+      '天道 '+K.BRANCHES[b.tendoBranch]+' ('+b.palaces[b.tendoPal].tendo+')');
   }
   if (state.cfg.twelve){
     for (var i=0;i<12;i++){
       var ang2 = i*30 + 15; // 支境界
-      L.polyline([[state.home.lat,state.home.lng], rhumbPoint(state.home.lat,state.home.lng, ang2 - D, T)],
-        {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
+      var lp2 = [[state.home.lat,state.home.lng], rhumbPoint(state.home.lat,state.home.lng, ang2 - D, T)];
+      L.polyline(lp2, {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
+      if (lp2[1][1] > 180) L.polyline(lp2.map(function(q){return [q[0],q[1]-360];}), {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
+      if (lp2[1][1] < -180) L.polyline(lp2.map(function(q){return [q[0],q[1]+360];}), {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
     }
   }
 }
@@ -721,6 +752,7 @@ function setHome(lat,lng){
 }
 function setDest(lat,lng){
   if (!hasMap) return;
+  lng = ((lng + 540) % 360) - 180;
   state.dest = {lat:lat,lng:lng};
   if (destMarker) destMarker.remove();
   destMarker = L.circleMarker([lat,lng], {radius:7,color:'#c62828',fillColor:'#c62828',fillOpacity:.9}).addTo(map);
@@ -848,7 +880,7 @@ function refreshJudge(){
   var head = tbl.insertRow();
   ['盤','回座星','関係','凶','評価'].forEach(function(h){ var th=document.createElement('th'); th.textContent=h; head.appendChild(th); });
   var kinds = ['year','month','day']; if (state.tab==='hour') kinds.push('hour');
-  var names = {'year':'年盤','month':'月盤','day':'日盤','hour':'時盤(未検証)'};
+  var names = {'year':'年盤','month':'月盤','day':'日盤','hour':'時盤'};
   kinds.forEach(function(k){
     var b = currentBoard(k), c = b.palaces[pal];
     var row = tbl.insertRow();
@@ -883,32 +915,39 @@ function drawSangouSlices(kyoku){
   K.SANGOU[kyoku].forEach(function(br){
     var pts = [[state.home.lat, state.home.lng]];
     for (var ang=br*30-15; ang<=br*30+15.001; ang+=10) pts.push(rhumbPoint(state.home.lat, state.home.lng, ang - D, T));
-    L.polygon(pts, {color:col, weight:2, opacity:.9, fillColor:col, fillOpacity:.22})
-      .bindTooltip(kyoku+' '+K.BRANCHES[br]+'（'+K.BRANCH_DIR[br]+'）', {sticky:true}).addTo(sangouLayer);
+    addWrapped(sangouLayer, pts, {color:col, weight:2, opacity:.9, fillColor:col, fillOpacity:.22},
+      kyoku+' '+K.BRANCHES[br]+'（'+K.BRANCH_DIR[br]+'）');
   });
 }
 function sangouCalc(){
-  var kyokuSel = $('sgKyoku').value, years = +$('sgYears').value, reqY = $('sgYear').checked;
+  var kyokuSel = $('sgKyoku').value, years = +$('sgYears').value;
+  var mode = $('sgMode').value, reqY = (mode==='strict');
+  store.set('sgMode', mode);
   var t = ymd($('target').value);
-  var res = K.sangouCandidates(personAtYear, boardCfg(), t.y, t.m, years*12, reqY);
+  var res = K.sangouCandidates(personAtYear, boardCfg(), t.y, t.m, years*12, reqY, 12);
   var out = [];
+  out.push('<div style="margin:6px 0;padding:6px 8px;border-radius:4px;background:'+(reqY?'#fde7ef':'#e8f5e9')+';font-weight:600;">'
+    + (reqY ? '厳格モード：年盤・月盤ともに吉の月だけを候補にしています' : '気軽モード：月盤のみ吉で候補を出しています（◎＝年盤も吉）')
+    + '　／　成立条件：初回から12ヶ月以内に3方位</div>');
   Object.keys(K.SANGOU).forEach(function(kyoku){
     if (kyokuSel!=='all' && kyoku!==kyokuSel) return;
     var r = res[kyoku];
     var names = K.SANGOU[kyoku].map(function(br){ return K.BRANCHES[br]; }).join('・');
     out.push('<div class="kyoku" style="border-left:5px solid '+SG_COLORS[kyoku]+'"><b>'+kyoku+'</b>（'+names+'）— '+K.SANGOU_EFFECT[kyoku]+'</div>');
     r.branches.forEach(function(bb){
-      var cells = bb.months.length ? bb.months.map(function(o){ return '<span class="ym">'+o.y+'年'+o.m+'月<small>('+o.setsu+')</small></span>'; }).join('') : '<span style="color:#a33">候補なし</span>';
+      var cells = bb.months.length ? bb.months.map(function(o){
+        var picked = r.plan && r.plan.some(function(pk){ return pk.br===bb.br && pk.y===o.y && pk.m===o.m; });
+        return '<span class="ym'+(picked?' pick':'')+'">'+(!reqY && o.yearGood ? '◎' : '')+o.y+'年'+o.m+'月<small>('+o.setsu+')</small></span>'; }).join('') : '<span style="color:#a33">候補なし</span>';
       out.push('<div class="row"><b>'+K.BRANCHES[bb.br]+'</b> '+K.BRANCH_DIR[bb.br]+'：'+cells+'</div>');
     });
     if (r.plan){
-      out.push('<div class="plan">最短の完成例：'+r.plan.map(function(pk){ return pk.y+'年'+pk.m+'月 '+K.BRANCHES[pk.br]+'('+K.BRANCH_DIR[pk.br]+')'; }).join(' → ')+'</div>');
+      out.push('<div class="plan">最短の完成例（1年以内）：'+r.plan.map(function(pk){ return pk.y+'年'+pk.m+'月 '+K.BRANCHES[pk.br]+'('+K.BRANCH_DIR[pk.br]+')'; }).join(' → ')+'</div>');
     } else {
       var miss = r.missing.map(function(br){ return K.BRANCHES[br]; }).join('・');
-      out.push('<div class="none">この期間では完成できません'+(miss?'（'+miss+'に候補なし）':'（別々の月で3方位が揃いません）')+'</div>');
+      out.push('<div class="none">この期間では成立しません'+(miss?'（'+miss+'に候補なし）':'（1年以内に3方位が揃う組み合わせがありません）')+'</div>');
     }
   });
-  out.push('<div style="color:#777;margin-top:6px;">判定：月盤（'+(reqY?'と年盤':'のみ')+'）で当該の支30度が吉方。破は支単位、九星の殺は宮単位。月は暦月（15日基準の節月を併記）。同じ月に2方位は取らない前提。</div>');
+  out.push('<div style="color:#777;margin-top:6px;">判定は当該の支30度。破は支単位、九星の殺は宮単位。月は暦月（15日基準の節月を併記）。色枠の月が最短例。</div>');
   $('sgOut').innerHTML = out.join('');
   drawSangouSlices(kyokuSel);
 }
@@ -983,7 +1022,7 @@ $('rangeBtn').onclick = function(){
   state.longRange = !state.longRange; store.set('longRange', state.longRange);
   applyRangeUI(); drawSectors();
   if (hasMap && state.home){
-    var z = state.longRange ? (map.getSize().x >= 800 ? 2 : 1) : 9;
+    var z = state.longRange ? map.getMinZoom() : 9;
     map.flyTo([state.home.lat, state.home.lng], z, {duration:1.4});
   }
 };
@@ -991,6 +1030,7 @@ applyRangeUI();
 K.PALACES.forEach(function(p){ var o=document.createElement('option'); o.value=p; o.textContent=K.PAL_NAME[p]; $('revPal').appendChild(o); });
 $('revBtn').onclick = reverseSearch;
 $('sgBtn').onclick = sangouCalc;
+$('sgMode').value = store.get('sgMode', 'strict');
 $('sgKyoku').onchange = function(){ drawSangouSlices(this.value); };
 
 // 設定
