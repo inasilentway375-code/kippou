@@ -107,7 +107,7 @@
         先 <select id="sgYears"><option>1</option><option>2</option><option selected>3</option></select> 年
         <br>基準
         <select id="sgMode">
-          <option value="strict" selected>厳格：年盤・月盤ともに吉（教わった基準）</option>
+          <option value="strict" selected>厳格：年盤・月盤ともに吉</option>
           <option value="casual">気軽：月盤のみ吉</option>
         </select>
         <button id="sgBtn">算出</button>
@@ -129,7 +129,7 @@
   </div>
   <label>月命の扱い:
     <select id="cfgGetsumei">
-      <option value="auto" selected>自動（数え18歳以上は外す）</option>
+      <option value="auto" selected>自動（数え19歳以上は外す）</option>
       <option value="on">常に使う</option>
       <option value="off">常に外す</option>
     </select>
@@ -621,7 +621,7 @@ function person(){
   var use;
   if (state.cfg.getsumeiMode==='on') use = true;
   else if (state.cfg.getsumeiMode==='off') use = false;
-  else use = kz <= 17; // 数え18歳以上は外す
+  else use = kz <= 18; // 数え18歳までは月命併用、19歳から本命のみ
   return {honmei:h, getsumei:g, kazoe:kz, useGetsumei:use};
 }
 function boardCfg(){
@@ -904,7 +904,7 @@ function personAtYear(y){
   var b = ymd(state.birth);
   var h = K.honmeiStar(b.y,b.m,b.d), g = K.getsumeiStar(b.y,b.m,b.d);
   var kz = K.kazoeAge(b.y, y);
-  var use = state.cfg.getsumeiMode==='on' ? true : state.cfg.getsumeiMode==='off' ? false : kz<=17;
+  var use = state.cfg.getsumeiMode==='on' ? true : state.cfg.getsumeiMode==='off' ? false : kz<=18;
   return {honmei:h, getsumei:g, kazoe:kz, useGetsumei:use};
 }
 function drawSangouSlices(kyoku){
@@ -965,7 +965,7 @@ function reverseSearch(){
       var b = ymd(state.birth);
       var h = K.honmeiStar(b.y,b.m,b.d), g = K.getsumeiStar(b.y,b.m,b.d);
       var kz = K.kazoeAge(b.y, o.y);
-      var use = state.cfg.getsumeiMode==='on' ? true : state.cfg.getsumeiMode==='off' ? false : kz<=17;
+      var use = state.cfg.getsumeiMode==='on' ? true : state.cfg.getsumeiMode==='off' ? false : kz<=18;
       return {honmei:h, getsumei:g, kazoe:kz, useGetsumei:use};
     })();
     var bd = K.buildBoard('day', o.y,o.m,o.d, null, pd, boardCfg());
