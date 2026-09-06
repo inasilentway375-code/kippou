@@ -119,7 +119,7 @@
 <div id="footNote">
   天道は月の天道を月盤・日盤に表示（支単位30度、橙色）。吉方と重なると「天道吉方」。
   偏角は緯度による近似値（±0.4度程度）で、境界付近は設定から手動調整可。
-  方位線は地図上の直線（航程線）。「方位線: 海外」で約1万kmまで描画。
+  方位線は地図上の直線（航程線）。「方位線: 海外」では自宅の反対側の子午線（経度±180°）まで描画。
 </div>
 
 <div id="settings"><div id="settingsInner">
@@ -695,18 +695,23 @@ function addWrapped(layer, pts, opts, tip){
     var pg = L.polygon(c, opts); if (tip) pg.bindTooltip(tip, {sticky:true}); pg.addTo(layer);
   });
 }
+// 方位線の描画長（メルカトル度スケール）。海外モードは自宅の反対側子午線(経度±180°)で打ち切る
+function rayT(trueAng){
+  if (!state.longRange) return 38;
+  var sn = Math.abs(Math.sin(trueAng*Math.PI/180));
+  return sn < 0.005 ? 260 : Math.min(260, 179.9/sn);
+}
 function drawSectors(){
   if (!hasMap) return;
   sectorLayer.clearLayers();
   if (!state.home) return;
   var b = currentBoard(state.tab==='hour'?'hour':state.tab);
   var D = declWest(state.home.lat);
-  var T = state.longRange ? 140 : 38; // 描画距離(度スケール) 国内≒4200km / 海外≒1万km超
   K.PALACES.forEach(function(p){
     var a = K.PAL_ANGLE[p], a0 = a[0], a1 = a[1]; if (a1 < a0) a1 += 360;
     var pts = [[state.home.lat, state.home.lng]];
     for (var ang=a0; ang<=a1+0.001; ang+=(a1-a0)/6){
-      pts.push(rhumbPoint(state.home.lat, state.home.lng, ang - D, T));
+      pts.push(rhumbPoint(state.home.lat, state.home.lng, ang - D, rayT(ang - D)));
     }
     var g = b.palaces[p].goods, bd = b.palaces[p].bads;
     var col, op;
@@ -721,7 +726,7 @@ function drawSectors(){
   if (b.tendoBranch !== null && b.tendoBranch !== undefined){
     var ta0 = b.tendoBranch*30-15, ta1 = b.tendoBranch*30+15;
     var tp = [[state.home.lat, state.home.lng]];
-    for (var ta=ta0; ta<=ta1+0.001; ta+=10) tp.push(rhumbPoint(state.home.lat, state.home.lng, ta - D, T));
+    for (var ta=ta0; ta<=ta1+0.001; ta+=10) tp.push(rhumbPoint(state.home.lat, state.home.lng, ta - D, rayT(ta - D)));
     var tcol = (b.palaces[b.tendoPal].tendo==='天道(凶重複)') ? '#999' : '#ff9800';
     addWrapped(sectorLayer, tp, {color:tcol, weight:1.2, opacity:.8, fillColor:tcol, fillOpacity:.18, dashArray:'6 4'},
       '天道 '+K.BRANCHES[b.tendoBranch]+' ('+b.palaces[b.tendoPal].tendo+')');
@@ -729,7 +734,7 @@ function drawSectors(){
   if (state.cfg.twelve){
     for (var i=0;i<12;i++){
       var ang2 = i*30 + 15; // 支境界
-      var lp2 = [[state.home.lat,state.home.lng], rhumbPoint(state.home.lat,state.home.lng, ang2 - D, T)];
+      var lp2 = [[state.home.lat,state.home.lng], rhumbPoint(state.home.lat,state.home.lng, ang2 - D, rayT(ang2 - D))];
       [-720,-360,0,360,720].forEach(function(sh){
         L.polyline(lp2.map(function(q){return [q[0],q[1]+sh];}), {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
       });
@@ -907,10 +912,10 @@ function drawSangouSlices(kyoku){
   if (!hasMap || !sangouLayer) return;
   sangouLayer.clearLayers();
   if (!state.home || !kyoku || kyoku==='all') return;
-  var D = declWest(state.home.lat), T = state.longRange ? 140 : 38, col = SG_COLORS[kyoku];
+  var D = declWest(state.home.lat), col = SG_COLORS[kyoku];
   K.SANGOU[kyoku].forEach(function(br){
     var pts = [[state.home.lat, state.home.lng]];
-    for (var ang=br*30-15; ang<=br*30+15.001; ang+=10) pts.push(rhumbPoint(state.home.lat, state.home.lng, ang - D, T));
+    for (var ang=br*30-15; ang<=br*30+15.001; ang+=10) pts.push(rhumbPoint(state.home.lat, state.home.lng, ang - D, rayT(ang - D)));
     addWrapped(sangouLayer, pts, {color:col, weight:2, opacity:.9, fillColor:col, fillOpacity:.22},
       kyoku+' '+K.BRANCHES[br]+'（'+K.BRANCH_DIR[br]+'）');
   });
