@@ -638,7 +638,7 @@ function currentBoard(kind){
 var map=null, homeMarker=null, destMarker=null, sectorLayer=null, sangouLayer=null, homeMode=false;
 var hasMap = (typeof L !== 'undefined');
 if (hasMap){
-  map = L.map('map', {worldCopyJump:false, maxBounds:[[-85,-180],[85,180]], maxBoundsViscosity:1.0})
+  map = L.map('map', {worldCopyJump:false})
           .setView(state.home ? [state.home.lat, state.home.lng] : [35.68, 139.70], state.home?10:6);
   // 世界1枚が画面幅を埋める倍率を最小ズームにする（複製表示を防ぐ）
   function applyMinZoom(){
@@ -651,11 +651,11 @@ if (hasMap){
   map.on('resize', applyMinZoom);
   var baseLayers = {
     '地理院 標準': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png',
-      {maxZoom:18, noWrap:true, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
+      {maxZoom:18, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
     '地理院 淡色': L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png',
-      {maxZoom:18, noWrap:true, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
+      {maxZoom:18, attribution:'<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">国土地理院</a>'}),
     'OSM (海外用)': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-      {maxZoom:19, noWrap:true, attribution:'&copy; OpenStreetMap contributors'})
+      {maxZoom:19, attribution:'&copy; OpenStreetMap contributors'})
   };
   var savedBase = store.get('baseLayer', '地理院 標準');
   (baseLayers[savedBase] || baseLayers['地理院 標準']).addTo(map);
@@ -690,11 +690,7 @@ function haversineKm(a, b){
 
 // 経度が±180を越える多角形を、日付変更線で回り込むように複製して追加
 function addWrapped(layer, pts, opts, tip){
-  var lngs = pts.map(function(q){ return q[1]; });
-  var mx = Math.max.apply(null,lngs), mn = Math.min.apply(null,lngs);
-  var copies = [pts];
-  if (mx > 180) copies.push(pts.map(function(q){ return [q[0], q[1]-360]; }));
-  if (mn < -180) copies.push(pts.map(function(q){ return [q[0], q[1]+360]; }));
+  var copies = [-720,-360,0,360,720].map(function(sh){ return pts.map(function(q){ return [q[0], q[1]+sh]; }); });
   copies.forEach(function(c){
     var pg = L.polygon(c, opts); if (tip) pg.bindTooltip(tip, {sticky:true}); pg.addTo(layer);
   });
@@ -734,9 +730,9 @@ function drawSectors(){
     for (var i=0;i<12;i++){
       var ang2 = i*30 + 15; // 支境界
       var lp2 = [[state.home.lat,state.home.lng], rhumbPoint(state.home.lat,state.home.lng, ang2 - D, T)];
-      L.polyline(lp2, {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
-      if (lp2[1][1] > 180) L.polyline(lp2.map(function(q){return [q[0],q[1]-360];}), {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
-      if (lp2[1][1] < -180) L.polyline(lp2.map(function(q){return [q[0],q[1]+360];}), {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
+      [-720,-360,0,360,720].forEach(function(sh){
+        L.polyline(lp2.map(function(q){return [q[0],q[1]+sh];}), {color:'#333', weight:.6, opacity:.4, dashArray:'4 6'}).addTo(sectorLayer);
+      });
     }
   }
 }
